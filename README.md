@@ -1,5 +1,5 @@
-BOP Merchant Bitcoin Server Client Utility
-==========================================
+BOP Merchant Bitcoin Server Utility
+===================================
 
 This is a client side utility for the BOP Merchant Bitcoin Server.
 
