@@ -184,9 +184,9 @@ public class KeyTool
 				long total = account.getConfirmed ();
 				if ( total != 0 )
 				{
-					Transaction transaction = account.pay (AddressConverter.fromSatoshiStyle (address, api.isProduction () ? 0x0 : 0x6f), total, FEE);
+					Transaction transaction = account.pay (AddressConverter.fromSatoshiStyle (address, api.isProduction () ? 0x0 : 0x6f), total - FEE, FEE);
 					long fee = BaseAccountManager.estimateFee (transaction);
-					transaction = account.pay (AddressConverter.fromSatoshiStyle (address, api.isProduction () ? 0x0 : 0x6f), total, fee);
+					transaction = account.pay (AddressConverter.fromSatoshiStyle (address, api.isProduction () ? 0x0 : 0x6f), total - fee, fee);
 					System.console ().printf ("You are about to send " + total + " satoshis " + address + "\nType yes to continue: ");
 					String yes = System.console ().readLine ();
 					if ( yes.equals ("yes") )
