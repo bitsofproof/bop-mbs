@@ -184,9 +184,13 @@ public class KeyTool
 				long total = account.getConfirmed ();
 				if ( total != 0 )
 				{
+					System.console ().printf ("Enter passphrase: ");
+					String passphrase = System.console ().readLine ();
+					w.unlock (passphrase);
 					Transaction transaction = account.pay (AddressConverter.fromSatoshiStyle (address, api.isProduction () ? 0x0 : 0x6f), total - FEE, FEE);
 					long fee = BaseAccountManager.estimateFee (transaction);
 					transaction = account.pay (AddressConverter.fromSatoshiStyle (address, api.isProduction () ? 0x0 : 0x6f), total - fee, fee);
+					w.lock ();
 					System.console ().printf (
 							"You are about to send " + (total - fee) + " satoshis (fee: " + fee + ") to " + address + "\nType yes to continue: ");
 					String yes = System.console ().readLine ();
