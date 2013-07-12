@@ -61,6 +61,7 @@ public class KeyTool
 		gnuOptions.addOption ("v", "private", true, "private key export");
 		gnuOptions.addOption ("w", "sweep", true, "sweep to address");
 		gnuOptions.addOption ("a", "address", true, "address to sweep to");
+		gnuOptions.addOption ("l", "lookahead", true, "number of addresses to look ahead while sweeping (default 100)");
 
 		System.out.println ("BOP Merchant Server Client 1.0 (c) 2013 bits of proof zrt.");
 		Security.addProvider (new BouncyCastleProvider ());
@@ -73,6 +74,7 @@ public class KeyTool
 		String pub = null;
 		String sweep = null;
 		String address = null;
+		String lookahead = null;
 		try
 		{
 			cl = parser.parse (gnuOptions, args);
@@ -84,6 +86,7 @@ public class KeyTool
 			priv = cl.getOptionValue ('v');
 			sweep = cl.getOptionValue ('w');
 			address = cl.getOptionValue ('a');
+			lookahead = cl.getOptionValue ('l');
 		}
 		catch ( org.apache.commons.cli.ParseException e )
 		{
@@ -175,7 +178,14 @@ public class KeyTool
 				api.isProduction ();
 				FileWallet w = FileWallet.read (sweep);
 				ExtendedKeyAccountManager account = (ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT);
-				account.sync (api, 10);
+
+				int lookAhead = 100;
+				if ( lookahead != null )
+				{
+					lookAhead = Integer.valueOf (lookahead);
+				}
+
+				account.sync (api, lookAhead);
 				if ( account.getChange () != 0 || account.getReceiving () != 0 )
 				{
 					System.err.println ("There are unconfirmed transactions pending with this key");
