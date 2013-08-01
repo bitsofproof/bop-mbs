@@ -18,6 +18,7 @@ import com.bitsofproof.supernode.api.AddressConverter;
 import com.bitsofproof.supernode.api.BCSAPI;
 import com.bitsofproof.supernode.api.BCSAPIException;
 import com.bitsofproof.supernode.api.BaseAccountManager;
+import com.bitsofproof.supernode.api.ExtendedKey;
 import com.bitsofproof.supernode.api.ExtendedKeyAccountManager;
 import com.bitsofproof.supernode.api.FileWallet;
 import com.bitsofproof.supernode.api.JMSServerConnector;
@@ -28,8 +29,6 @@ public class KeyTool
 {
 	private static final String ACCOUNT = "BMBS";
 	private static final long FEE = 10000;
-
-	private static int addressFlag;
 
 	private static ConnectionFactory getConnectionFactory (String server, String user, String password)
 	{
@@ -61,9 +60,10 @@ public class KeyTool
 		gnuOptions.addOption ("v", "private", true, "private key export");
 		gnuOptions.addOption ("w", "sweep", true, "sweep to address");
 		gnuOptions.addOption ("a", "address", true, "address to sweep to");
+		gnuOptions.addOption ("i", "import", true, "import private key");
 		gnuOptions.addOption ("l", "lookahead", true, "number of addresses to look ahead while sweeping (default 100)");
 
-		System.out.println ("BOP Merchant Server Client 1.0 (c) 2013 bits of proof zrt.");
+		System.out.println ("BOP Merchant Server Client 1.1 (c) 2013 bits of proof zrt.");
 		Security.addProvider (new BouncyCastleProvider ());
 		CommandLine cl = null;
 		String url = null;
@@ -75,6 +75,7 @@ public class KeyTool
 		String sweep = null;
 		String address = null;
 		String lookahead = null;
+		String importKey = null;
 		try
 		{
 			cl = parser.parse (gnuOptions, args);
@@ -87,6 +88,7 @@ public class KeyTool
 			sweep = cl.getOptionValue ('w');
 			address = cl.getOptionValue ('a');
 			lookahead = cl.getOptionValue ('l');
+			importKey = cl.getOptionValue ('i');
 		}
 		catch ( org.apache.commons.cli.ParseException e )
 		{
@@ -176,8 +178,18 @@ public class KeyTool
 			{
 				BCSAPI api = getServer (getConnectionFactory (url, user, password));
 				api.isProduction ();
-				FileWallet w = FileWallet.read (sweep);
-				ExtendedKeyAccountManager account = (ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT);
+				ExtendedKeyAccountManager account;
+				FileWallet w = null;
+				if ( importKey == null )
+				{
+					w = FileWallet.read (sweep);
+					account = (ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT);
+				}
+				else
+				{
+					account = new ExtendedKeyAccountManager ("", System.currentTimeMillis () / 1000);
+					account.setMaster (ExtendedKey.parse (importKey));
+				}
 
 				int lookAhead = 100;
 				if ( lookahead != null )
@@ -196,11 +208,17 @@ public class KeyTool
 				{
 					System.console ().printf ("Enter passphrase: ");
 					String passphrase = System.console ().readLine ();
-					w.unlock (passphrase);
+					if ( w != null )
+					{
+						w.unlock (passphrase);
+					}
 					Transaction transaction = account.pay (AddressConverter.fromSatoshiStyle (address, api.isProduction () ? 0x0 : 0x6f), total - FEE, FEE);
 					long fee = BaseAccountManager.estimateFee (transaction);
 					transaction = account.pay (AddressConverter.fromSatoshiStyle (address, api.isProduction () ? 0x0 : 0x6f), total - fee, fee);
-					w.lock ();
+					if ( w != null )
+					{
+						w.lock ();
+					}
 					System.console ().printf (
 							"You are about to send " + (total - fee) + " satoshis (fee: " + fee + ") to " + address + "\nType yes to continue: ");
 					String yes = System.console ().readLine ();
