@@ -63,7 +63,7 @@ public class KeyTool
 		gnuOptions.addOption ("i", "import", true, "import private key");
 		gnuOptions.addOption ("l", "lookahead", true, "number of addresses to look ahead while sweeping (default 100)");
 
-		System.out.println ("BOP Merchant Server Client 1.1 (c) 2013 bits of proof zrt.");
+		System.out.println ("BOP Merchant Server Client 1.2 (c) 2013 bits of proof zrt.");
 		Security.addProvider (new BouncyCastleProvider ());
 		CommandLine cl = null;
 		String url = null;
