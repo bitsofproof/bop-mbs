@@ -179,25 +179,26 @@ public class KeyTool
 				BCSAPI api = getServer (getConnectionFactory (url, user, password));
 				api.isProduction ();
 				ExtendedKeyAccountManager account;
-				FileWallet w = null;
-				if ( importKey == null )
-				{
-					w = FileWallet.read (sweep);
-					account = (ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT);
-				}
-				else
-				{
-					account = new ExtendedKeyAccountManager ("", System.currentTimeMillis () / 1000);
-					account.setMaster (ExtendedKey.parse (importKey));
-				}
-
 				int lookAhead = 100;
 				if ( lookahead != null )
 				{
 					lookAhead = Integer.valueOf (lookahead);
 				}
 
-				account.sync (api, lookAhead);
+				FileWallet w = null;
+				if ( importKey == null )
+				{
+					w = FileWallet.read (sweep);
+					account = (ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT);
+					w.sync (api, lookAhead);
+				}
+				else
+				{
+					account = new ExtendedKeyAccountManager ();
+					account.setMaster (ExtendedKey.parse (importKey));
+					account.sync (api, lookAhead, 0);
+				}
+
 				if ( account.getChange () != 0 || account.getReceiving () != 0 )
 				{
 					System.err.println ("There are unconfirmed transactions pending with this key");
