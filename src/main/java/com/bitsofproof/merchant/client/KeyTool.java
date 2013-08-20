@@ -1,259 +1,403 @@
 package com.bitsofproof.merchant.client;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.StringWriter;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.security.Security;
-import java.util.UUID;
-
-import javax.jms.ConnectionFactory;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.GnuParser;
 import org.apache.commons.cli.Options;
+import org.apache.commons.codec.binary.Base64;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.DefaultHttpClient;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.fusesource.stomp.jms.StompJmsConnectionFactory;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import com.bitsofproof.supernode.api.AddressConverter;
-import com.bitsofproof.supernode.api.BCSAPI;
-import com.bitsofproof.supernode.api.BCSAPIException;
-import com.bitsofproof.supernode.api.BaseAccountManager;
 import com.bitsofproof.supernode.api.ExtendedKey;
 import com.bitsofproof.supernode.api.ExtendedKeyAccountManager;
 import com.bitsofproof.supernode.api.FileWallet;
-import com.bitsofproof.supernode.api.JMSServerConnector;
 import com.bitsofproof.supernode.api.Transaction;
+import com.bitsofproof.supernode.api.TransactionInput;
+import com.bitsofproof.supernode.api.TransactionOutput;
+import com.bitsofproof.supernode.common.ByteUtils;
+import com.bitsofproof.supernode.common.Key;
+import com.bitsofproof.supernode.common.ScriptFormat;
+import com.bitsofproof.supernode.common.ScriptFormat.Opcode;
 import com.bitsofproof.supernode.common.ValidationException;
+import com.bitsofproof.supernode.common.WireFormat;
 
 public class KeyTool
 {
-	private static final String ACCOUNT = "BMBS";
+	private static final String ACCOUNT = "BopShop";
+	private static final String KEYFILE = "bopshop.key";
 	private static final long FEE = 10000;
-
-	private static ConnectionFactory getConnectionFactory (String server, String user, String password)
-	{
-		StompJmsConnectionFactory connectionFactory = new StompJmsConnectionFactory ();
-		connectionFactory.setBrokerURI (server);
-		connectionFactory.setUsername (user);
-		connectionFactory.setPassword (password);
-		return connectionFactory;
-	}
-
-	private static BCSAPI getServer (ConnectionFactory connectionFactory)
-	{
-		JMSServerConnector connector = new JMSServerConnector ();
-		connector.setConnectionFactory (connectionFactory);
-		connector.setClientId (UUID.randomUUID ().toString ());
-		connector.init ();
-		return connector;
-	}
 
 	public static void main (String[] args)
 	{
 		final CommandLineParser parser = new GnuParser ();
 		final Options gnuOptions = new Options ();
-		gnuOptions.addOption ("s", "server", true, "Server URL");
-		gnuOptions.addOption ("u", "user", true, "User");
-		gnuOptions.addOption ("p", "password", true, "Password");
-		gnuOptions.addOption ("n", "newkey", true, "new key");
-		gnuOptions.addOption ("b", "public", true, "public key export");
-		gnuOptions.addOption ("v", "private", true, "private key export");
-		gnuOptions.addOption ("w", "sweep", true, "sweep to address");
-		gnuOptions.addOption ("a", "address", true, "address to sweep to");
-		gnuOptions.addOption ("i", "import", true, "import private key");
-		gnuOptions.addOption ("l", "lookahead", true, "number of addresses to look ahead while sweeping (default 100)");
+		gnuOptions.addOption ("u", "user", true, "user");
+		gnuOptions.addOption ("p", "password", true, "password");
+		gnuOptions.addOption ("n", "name", true, "name");
+		gnuOptions.addOption ("e", "email", true, "email");
+		gnuOptions.addOption ("r", "register", false, "create new key and account");
+		gnuOptions.addOption ("c", "claim", true, "claim a payment request");
+		gnuOptions.addOption ("a", "address", true, "address to forward the claimed amount");
 
-		System.out.println ("BOP Merchant Server Client 1.2 (c) 2013 bits of proof zrt.");
+		System.out.println ("BOP Merchant Server Client 1.3 (c) 2013 bits of proof zrt.");
 		Security.addProvider (new BouncyCastleProvider ());
 		CommandLine cl = null;
-		String url = null;
 		String user = null;
 		String password = null;
-		String newkey = null;
-		String priv = null;
-		String pub = null;
-		String sweep = null;
+		String name = null;
+		String email = null;
+		String claim = null;
 		String address = null;
-		String lookahead = null;
-		String importKey = null;
+		boolean register = false;
 		try
 		{
 			cl = parser.parse (gnuOptions, args);
-			url = cl.getOptionValue ('s');
+			name = cl.getOptionValue ('n');
+			email = cl.getOptionValue ('e');
 			user = cl.getOptionValue ('u');
 			password = cl.getOptionValue ('p');
-			newkey = cl.getOptionValue ('n');
-			pub = cl.getOptionValue ('b');
-			priv = cl.getOptionValue ('v');
-			sweep = cl.getOptionValue ('w');
+			register = cl.hasOption ('r');
+			claim = cl.getOptionValue ('c');
 			address = cl.getOptionValue ('a');
-			lookahead = cl.getOptionValue ('l');
-			importKey = cl.getOptionValue ('i');
 		}
 		catch ( org.apache.commons.cli.ParseException e )
 		{
 			e.printStackTrace ();
 			System.exit (1);
 		}
-		if ( newkey != null )
+		if ( register )
 		{
-			File keyfile = new File (newkey);
-			if ( keyfile.exists () )
+			if ( name == null || email == null )
 			{
-				System.err.println ("key file " + newkey + " already exists.");
+				System.err.println ("also support -n name -e email");
 				System.exit (1);
 			}
-			System.console ().printf ("Enter passphrase: ");
-			String passphrase = System.console ().readLine ();
-			FileWallet w = new FileWallet (newkey);
-			w.init (passphrase);
+			File keyfile = new File (KEYFILE);
+			if ( keyfile.exists () )
+			{
+				System.err.println ("key file " + KEYFILE + " already exists.");
+				System.exit (1);
+			}
+			if ( password == null )
+			{
+				byte[] newpass = new byte[10];
+				new SecureRandom ().nextBytes (newpass);
+				password = ByteUtils.toBase58 (newpass);
+			}
+			FileWallet w = new FileWallet (KEYFILE);
+			w.init (password);
 			try
 			{
-				w.unlock (passphrase);
-				w.createAccountManager (ACCOUNT);
+				w.unlock (password);
+				ExtendedKeyAccountManager account = (ExtendedKeyAccountManager) w.createAccountManager (ACCOUNT);
 				w.lock ();
 				w.persist ();
+
+				String publicKey = account.getMaster ().serialize (true);
+
+				HttpClient httpclient = new DefaultHttpClient ();
+				HttpPost post = new HttpPost ("https://api.bitsofproof.com/mbs/1/account");
+				post.setHeader ("Content-Type", "application/json");
+				JSONObject r = new JSONObject ();
+				r.put ("name", name);
+				r.put ("password", password);
+				r.put ("publicKey", publicKey);
+				r.put ("email", email);
+				post.setEntity (new StringEntity (r.toString ()));
+				HttpResponse response = httpclient.execute (post);
+				if ( response.getEntity () != null )
+				{
+					BufferedReader in = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
+					StringWriter writer = new StringWriter ();
+					String line;
+					while ( (line = in.readLine ()) != null )
+					{
+						writer.write (line);
+					}
+					JSONObject reply = new JSONObject (writer.toString ());
+					System.out.println ("user id " + reply.getString ("customerId"));
+					System.out.println ("password: " + password);
+					System.out.println ("Google authenticator secret: " + reply.getString ("secret"));
+					System.out.println ("public key: " + publicKey);
+				}
 			}
 			catch ( ValidationException e )
 			{
 				System.err.println ("Unexpected: " + e.getMessage ());
 				System.exit (1);
 			}
-			catch ( IOException e )
+			catch ( JSONException e )
 			{
-				System.err.println ("Can not store key file " + newkey + " " + e.getMessage ());
+				e.printStackTrace ();
 				System.exit (1);
-			}
-		}
-		else if ( pub != null )
-		{
-			try
-			{
-				FileWallet w = FileWallet.read (pub);
-				ExtendedKeyAccountManager am = (ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT);
-				System.out.println (am.getMaster ().serialize (true));
 			}
 			catch ( IOException e )
 			{
-				System.err.println ("Can not read key file " + pub + " " + e.getMessage ());
-				System.exit (1);
-			}
-			catch ( ValidationException e )
-			{
-				System.err.println ("Can not read key file " + pub + " " + e.getMessage ());
+				System.err.println ("Can not store key file " + KEYFILE + " " + e.getMessage ());
 				System.exit (1);
 			}
 		}
-		else if ( priv != null )
+		if ( claim != null )
 		{
-			try
+			if ( user == null || password == null || address == null )
 			{
-				FileWallet w = FileWallet.read (priv);
-				ExtendedKeyAccountManager am = (ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT);
-				System.console ().printf ("Enter passphrase: ");
-				String passphrase = System.console ().readLine ();
-				w.unlock (passphrase);
-				System.out.println (am.getMaster ().serialize (true));
-				w.lock ();
-			}
-			catch ( IOException e )
-			{
-				System.err.println ("Can not read key file " + priv + " " + e.getMessage ());
-				System.exit (1);
-			}
-			catch ( ValidationException e )
-			{
-				System.err.println ("Can not read key file " + priv + " " + e.getMessage ());
-				System.exit (1);
-			}
-		}
-		if ( sweep != null )
-		{
-			if ( url == null || user == null || password == null || address == null )
-			{
-				System.err.println ("Need -s server -u user -p password --address address");
+				System.err.println ("Provide -u user -p password -a address");
 				System.exit (1);
 			}
 			try
 			{
-				BCSAPI api = getServer (getConnectionFactory (url, user, password));
-				api.isProduction ();
-				ExtendedKeyAccountManager account;
-				int lookAhead = 100;
-				if ( lookahead != null )
+				HttpClient httpclient = new DefaultHttpClient ();
+				HttpGet get = new HttpGet ("https://api.bitsofproof.com/mbs/1/paymentRequest/" + claim);
+				String authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
+				get.setHeader ("Authorization", authorizationString);
+				HttpResponse response = httpclient.execute (get);
+				String output = null;
+				if ( response.getEntity () != null )
 				{
-					lookAhead = Integer.valueOf (lookahead);
+					BufferedReader in = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
+					StringWriter writer = new StringWriter ();
+					String line;
+					while ( (line = in.readLine ()) != null )
+					{
+						writer.write (line);
+					}
+					output = writer.toString ();
+				}
+				JSONObject pr = new JSONObject (output);
+				/*
+				 * if ( !pr.getString ("state").equals ("CLEARED") ) { if ( pr.getString ("state").equals ("PAID") ) { System.err.println ("The provision of " +
+				 * pr.getLong ("provisionAmount") + " is not yet paid to " + pr.getString ("provisionAddress")); System.exit (1); } else { System.err.println
+				 * ("This payment request was not paid"); System.exit (1); } }
+				 */
+				long fee = 10000;
+
+				Transaction t = new Transaction ();
+				List<TransactionInput> inputs = new ArrayList<TransactionInput> ();
+				t.setInputs (inputs);
+				List<TransactionOutput> outputs = new ArrayList<TransactionOutput> ();
+				t.setOutputs (outputs);
+				JSONArray events = pr.getJSONArray ("events");
+				int keyNumber = -1;
+				for ( int i = 0; i < events.length (); ++i )
+				{
+					JSONObject event = events.getJSONObject (i);
+					if ( event.getString ("eventType").equals ("CLEARED") )
+					{
+						keyNumber = event.getInt ("keyNumber");
+					}
+					else if ( event.getString ("eventType").equals ("TRANSACTION") )
+					{
+						TransactionInput in = new TransactionInput ();
+						in.setSourceHash (event.getString ("txHash"));
+						in.setIx (event.getInt ("ix"));
+						in.setScript (ByteUtils.fromHex (event.getString ("script")));
+
+						boolean duplicate = false;
+						for ( TransactionInput c : inputs )
+						{
+							if ( c.getSourceHash ().equals (in.getSourceHash ()) && c.getIx () == in.getIx () )
+							{
+								duplicate = true;
+							}
+						}
+						if ( !duplicate )
+						{
+							inputs.add (in);
+						}
+					}
+				}
+				TransactionOutput o = new TransactionOutput ();
+				o.setValue (pr.getLong ("paid") - fee);
+				outputs.add (o);
+				ScriptFormat.Writer writer = new ScriptFormat.Writer ();
+				writer.writeToken (new ScriptFormat.Token (Opcode.OP_DUP));
+				writer.writeToken (new ScriptFormat.Token (Opcode.OP_HASH160));
+				byte[] a = AddressConverter.fromSatoshiStyle (address, 0x0);
+				if ( a.length != 20 )
+				{
+					throw new ValidationException ("claim to an address");
+				}
+				writer.writeData (a);
+				writer.writeToken (new ScriptFormat.Token (Opcode.OP_EQUALVERIFY));
+				writer.writeToken (new ScriptFormat.Token (Opcode.OP_CHECKSIG));
+				o.setScript (writer.toByteArray ());
+
+				FileWallet w = FileWallet.read (KEYFILE);
+				w.unlock (password);
+				ExtendedKey master = ((ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT)).getMaster ();
+				int j = 0;
+				for ( TransactionInput i : inputs )
+				{
+					ScriptFormat.Writer sw = new ScriptFormat.Writer ();
+					Key key = master.getChild (pr.getInt ("child")).getKey (keyNumber);
+					if ( key == null )
+					{
+						throw new ValidationException ("Have no key to spend this output");
+					}
+					byte[] sig = key.sign (hashTransaction (t, j, ScriptFormat.SIGHASH_ALL, i.getScript ()));
+					byte[] sigPlusType = new byte[sig.length + 1];
+					System.arraycopy (sig, 0, sigPlusType, 0, sig.length);
+					sigPlusType[sigPlusType.length - 1] = (byte) (ScriptFormat.SIGHASH_ALL & 0xff);
+					sw.writeData (sigPlusType);
+					sw.writeData (key.getPublic ());
+					i.setScript (sw.toByteArray ());
+					++j;
+				}
+				HttpPost post = new HttpPost ("https://api.bitsofproof.com/mbs/1/route");
+				post.setHeader ("Content-Type", "application/json");
+				authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
+				post.setHeader ("Authorization", authorizationString);
+				JSONObject r = new JSONObject ();
+				r.put ("transaction", t.toWireDump ());
+				t.computeHash ();
+				System.out.println (t.getHash ());
+				System.out.println (t.toWireDump ());
+				post.setEntity (new StringEntity (r.toString ()));
+				response = httpclient.execute (post);
+				if ( response.getEntity () != null )
+				{
+					BufferedReader in = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
+					StringWriter wr = new StringWriter ();
+					String line;
+					while ( (line = in.readLine ()) != null )
+					{
+						wr.write (line);
+					}
+					System.out.println (wr.toString ());
 				}
 
-				FileWallet w = null;
-				if ( importKey == null )
-				{
-					w = FileWallet.read (sweep);
-					account = (ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT);
-					w.sync (api, lookAhead);
-				}
-				else
-				{
-					account = new ExtendedKeyAccountManager ();
-					account.setMaster (ExtendedKey.parse (importKey));
-					account.sync (api, lookAhead, 0);
-				}
-
-				if ( account.getChange () != 0 || account.getReceiving () != 0 )
-				{
-					System.err.println ("There are unconfirmed transactions pending with this key");
-					System.exit (1);
-				}
-				long total = account.getConfirmed ();
-				if ( total != 0 )
-				{
-					System.console ().printf ("Enter passphrase: ");
-					String passphrase = System.console ().readLine ();
-					if ( w != null )
-					{
-						w.unlock (passphrase);
-					}
-					Transaction transaction = account.pay (AddressConverter.fromSatoshiStyle (address, api.isProduction () ? 0x0 : 0x6f), total - FEE, FEE);
-					long fee = BaseAccountManager.estimateFee (transaction);
-					transaction = account.pay (AddressConverter.fromSatoshiStyle (address, api.isProduction () ? 0x0 : 0x6f), total - fee, fee);
-					if ( w != null )
-					{
-						w.lock ();
-					}
-					System.console ().printf (
-							"You are about to send " + (total - fee) + " satoshis (fee: " + fee + ") to " + address + "\nType yes to continue: ");
-					String yes = System.console ().readLine ();
-					if ( yes.equals ("yes") )
-					{
-						api.sendTransaction (transaction);
-						System.out.println (transaction.getHash ());
-					}
-					else
-					{
-						System.out.println ("Nothing happened.");
-					}
-				}
-				else
-				{
-					System.out.println ("There are no funds available to sweep.");
-				}
 			}
 			catch ( IOException e )
 			{
-				System.err.println ("Can not read key file " + priv + " " + e.getMessage ());
+				e.printStackTrace ();
 				System.exit (1);
 			}
 			catch ( ValidationException e )
 			{
-				System.err.println ("Can not read key file " + priv + " " + e.getMessage ());
+				e.printStackTrace ();
 				System.exit (1);
 			}
-			catch ( BCSAPIException e )
+			catch ( JSONException e )
 			{
-				System.err.println ("Can not sweep key file " + priv + " " + e.getMessage ());
+				e.printStackTrace ();
 				System.exit (1);
 			}
 		}
 		System.exit (0);
 	}
+
+	private static byte[] hashTransaction (Transaction transaction, int inr, int hashType, byte[] script) throws ValidationException
+	{
+		Transaction copy = null;
+		try
+		{
+			copy = transaction.clone ();
+		}
+		catch ( CloneNotSupportedException e1 )
+		{
+			return null;
+		}
+
+		// implicit SIGHASH_ALL
+		int i = 0;
+		for ( TransactionInput in : copy.getInputs () )
+		{
+			if ( i == inr )
+			{
+				in.setScript (script);
+			}
+			else
+			{
+				in.setScript (new byte[0]);
+			}
+			++i;
+		}
+
+		if ( (hashType & 0x1f) == ScriptFormat.SIGHASH_NONE )
+		{
+			copy.getOutputs ().clear ();
+			i = 0;
+			for ( TransactionInput in : copy.getInputs () )
+			{
+				if ( i != inr )
+				{
+					in.setSequence (0);
+				}
+				++i;
+			}
+		}
+		else if ( (hashType & 0x1f) == ScriptFormat.SIGHASH_SINGLE )
+		{
+			int onr = inr;
+			if ( onr >= copy.getOutputs ().size () )
+			{
+				// this is a Satoshi client bug.
+				// This case should throw an error but it instead retuns 1 that is not checked and interpreted as below
+				return ByteUtils.fromHex ("0100000000000000000000000000000000000000000000000000000000000000");
+			}
+			for ( i = copy.getOutputs ().size () - 1; i > onr; --i )
+			{
+				copy.getOutputs ().remove (i);
+			}
+			for ( i = 0; i < onr; ++i )
+			{
+				copy.getOutputs ().get (i).setScript (new byte[0]);
+				copy.getOutputs ().get (i).setValue (-1L);
+			}
+			i = 0;
+			for ( TransactionInput in : copy.getInputs () )
+			{
+				if ( i != inr )
+				{
+					in.setSequence (0);
+				}
+				++i;
+			}
+		}
+		if ( (hashType & ScriptFormat.SIGHASH_ANYONECANPAY) != 0 )
+		{
+			List<TransactionInput> oneIn = new ArrayList<TransactionInput> ();
+			oneIn.add (copy.getInputs ().get (inr));
+			copy.setInputs (oneIn);
+		}
+
+		WireFormat.Writer writer = new WireFormat.Writer ();
+		copy.toWire (writer);
+
+		byte[] txwire = writer.toByteArray ();
+		byte[] hash = null;
+		try
+		{
+			MessageDigest a = MessageDigest.getInstance ("SHA-256");
+			a.update (txwire);
+			a.update (new byte[] { (byte) (hashType & 0xff), 0, 0, 0 });
+			hash = a.digest (a.digest ());
+		}
+		catch ( NoSuchAlgorithmException e )
+		{
+		}
+		return hash;
+	}
+
 }
