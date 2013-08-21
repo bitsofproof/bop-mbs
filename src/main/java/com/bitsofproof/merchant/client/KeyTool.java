@@ -185,11 +185,21 @@ public class KeyTool
 					output = writer.toString ();
 				}
 				JSONObject pr = new JSONObject (output);
-				/*
-				 * if ( !pr.getString ("state").equals ("CLEARED") ) { if ( pr.getString ("state").equals ("PAID") ) { System.err.println ("The provision of " +
-				 * pr.getLong ("provisionAmount") + " is not yet paid to " + pr.getString ("provisionAddress")); System.exit (1); } else { System.err.println
-				 * ("This payment request was not paid"); System.exit (1); } }
-				 */
+
+				if ( !pr.getString ("state").equals ("CLEARED") )
+				{
+					if ( pr.getString ("state").equals ("PAID") )
+					{
+						System.err.println ("The provision of " + pr.getLong ("provisionAmount") + " is not yet paid to " + pr.getString ("provisionAddress"));
+						System.exit (1);
+					}
+					else
+					{
+						System.err.println ("This payment request was not paid");
+						System.exit (1);
+					}
+				}
+
 				long fee = 10000;
 
 				Transaction t = new Transaction ();
@@ -264,15 +274,13 @@ public class KeyTool
 					i.setScript (sw.toByteArray ());
 					++j;
 				}
+				System.out.println ("Sending " + o.getValue () + " satoshis to " + address);
 				HttpPost post = new HttpPost ("https://api.bitsofproof.com/mbs/1/route");
 				post.setHeader ("Content-Type", "application/json");
 				authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
 				post.setHeader ("Authorization", authorizationString);
 				JSONObject r = new JSONObject ();
 				r.put ("transaction", t.toWireDump ());
-				t.computeHash ();
-				System.out.println (t.getHash ());
-				System.out.println (t.toWireDump ());
 				post.setEntity (new StringEntity (r.toString ()));
 				response = httpclient.execute (post);
 				if ( response.getEntity () != null )
@@ -284,7 +292,7 @@ public class KeyTool
 					{
 						wr.write (line);
 					}
-					System.out.println (wr.toString ());
+					System.out.println ("Sent transaction: " + wr.toString ());
 				}
 
 			}
