@@ -44,5 +44,5 @@ Unexpected: java.security.InvalidKeyException: Illegal key size or default param
 You likely run Oracle version 7 of java and need to additionally install JCE downloadable from:
 http://www.oracle.com/technetwork/java/javase/downloads/jce-7-download-432124.html
 
-unzip and copy the files into your java runtime home lib/security folder.
+unzip and copy the files local_policy.jar and US_export_policy.jar into your java runtime home lib/security folder.
 Eg. on OS X it is: /Library/Java/JavaVirtualMachines/jdk1.7.0_25.jdk/Contents/Home/jre/lib/security/
