@@ -59,8 +59,9 @@ public class KeyTool
 		gnuOptions.addOption ("r", "register", false, "create new key and account");
 		gnuOptions.addOption ("c", "claim", true, "claim a payment request");
 		gnuOptions.addOption ("a", "address", true, "address to forward the claimed amount");
+		gnuOptions.addOption ("E", "export", false, "Export master private key");
 
-		System.out.println ("BOP Merchant Server Client 1.3 (c) 2013 bits of proof zrt.");
+		System.out.println ("BOP Merchant Server Client 2.0 (c) 2013 bits of proof zrt.");
 		Security.addProvider (new BouncyCastleProvider ());
 		CommandLine cl = null;
 		String user = null;
@@ -69,6 +70,7 @@ public class KeyTool
 		String email = null;
 		String claim = null;
 		String address = null;
+		boolean export = false;
 		boolean register = false;
 		try
 		{
@@ -80,13 +82,40 @@ public class KeyTool
 			register = cl.hasOption ('r');
 			claim = cl.getOptionValue ('c');
 			address = cl.getOptionValue ('a');
+			export = cl.hasOption ('E');
 		}
 		catch ( org.apache.commons.cli.ParseException e )
 		{
 			e.printStackTrace ();
 			System.exit (1);
 		}
-		if ( register )
+		if ( export )
+		{
+			if ( password == null )
+			{
+				System.err.println ("also support -p password");
+				System.exit (1);
+			}
+			FileWallet w;
+			try
+			{
+				w = FileWallet.read (KEYFILE);
+				w.unlock (password);
+				System.out.println ("Private key: " + w.getMaster ().serialize (true));
+				w.lock ();
+			}
+			catch ( IOException e )
+			{
+				e.printStackTrace ();
+				System.exit (1);
+			}
+			catch ( ValidationException e )
+			{
+				e.printStackTrace ();
+				System.exit (1);
+			}
+		}
+		else if ( register )
 		{
 			if ( name == null || email == null )
 			{
@@ -136,10 +165,9 @@ public class KeyTool
 						writer.write (line);
 					}
 					JSONObject reply = new JSONObject (writer.toString ());
-					System.out.println ("user id " + reply.getString ("customerId"));
+					System.out.println ("user id: " + reply.getString ("customerId"));
 					System.out.println ("password: " + password);
 					System.out.println ("Google authenticator secret: " + reply.getString ("secret"));
-					System.out.println ("public key: " + publicKey);
 				}
 			}
 			catch ( ValidationException e )
