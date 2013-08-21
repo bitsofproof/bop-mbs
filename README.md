@@ -35,3 +35,14 @@ Once a payment request is paid by your customer and the BOP provision is paid by
 At this point you may use this utility to transfer the funds to their destination address (e.g. cold storage) as follows:
 
        java -Djavax.net.ssl.trustStore=netlock.trust -jar target/bop-mbs-2.0.jar -u userid -p password -c requestid -a youraddress
+       
+Java 7 remarks
+--------------
+In case you receive:
+Unexpected: java.security.InvalidKeyException: Illegal key size or default parameters
+
+You likely run Oracle version 7 of java and need to additionally install JCE downloadable from:
+http://www.oracle.com/technetwork/java/javase/downloads/jce-7-download-432124.html
+
+unzip and copy the files into your java runtime home lib/security folder.
+Eg. on OS X it is: /Library/Java/JavaVirtualMachines/jdk1.7.0_25.jdk/Contents/Home/jre/lib/security/
