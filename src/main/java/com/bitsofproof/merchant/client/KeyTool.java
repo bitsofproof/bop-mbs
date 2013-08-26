@@ -30,8 +30,6 @@ import org.json.JSONObject;
 
 import com.bitsofproof.supernode.api.AddressConverter;
 import com.bitsofproof.supernode.api.ExtendedKey;
-import com.bitsofproof.supernode.api.ExtendedKeyAccountManager;
-import com.bitsofproof.supernode.api.FileWallet;
 import com.bitsofproof.supernode.api.Transaction;
 import com.bitsofproof.supernode.api.TransactionInput;
 import com.bitsofproof.supernode.api.TransactionOutput;
@@ -41,6 +39,8 @@ import com.bitsofproof.supernode.common.ScriptFormat;
 import com.bitsofproof.supernode.common.ScriptFormat.Opcode;
 import com.bitsofproof.supernode.common.ValidationException;
 import com.bitsofproof.supernode.common.WireFormat;
+import com.bitsofproof.wallet.ExtendedKeyAccountManager;
+import com.bitsofproof.wallet.FileWallet;
 
 public class KeyTool
 {
