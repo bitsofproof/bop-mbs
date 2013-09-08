@@ -28,25 +28,24 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import com.bitsofproof.supernode.api.AddressConverter;
-import com.bitsofproof.supernode.api.ExtendedKey;
 import com.bitsofproof.supernode.api.Transaction;
 import com.bitsofproof.supernode.api.TransactionInput;
 import com.bitsofproof.supernode.api.TransactionOutput;
 import com.bitsofproof.supernode.common.ByteUtils;
+import com.bitsofproof.supernode.common.ExtendedKey;
 import com.bitsofproof.supernode.common.Key;
 import com.bitsofproof.supernode.common.ScriptFormat;
 import com.bitsofproof.supernode.common.ScriptFormat.Opcode;
 import com.bitsofproof.supernode.common.ValidationException;
 import com.bitsofproof.supernode.common.WireFormat;
-import com.bitsofproof.wallet.ExtendedKeyAccountManager;
-import com.bitsofproof.wallet.FileWallet;
+import com.bitsofproof.supernode.wallet.AddressConverter;
+import com.bitsofproof.supernode.wallet.ExtendedKeyAccountManager;
+import com.bitsofproof.supernode.wallet.SimpleFileWallet;
 
 public class KeyTool
 {
 	private static final String ACCOUNT = "BopShop";
 	private static final String KEYFILE = "bopshop.key";
-	private static final long FEE = 10000;
 
 	public static void main (String[] args)
 	{
@@ -96,10 +95,10 @@ public class KeyTool
 				System.err.println ("also support -p password");
 				System.exit (1);
 			}
-			FileWallet w;
+			SimpleFileWallet w;
 			try
 			{
-				w = FileWallet.read (KEYFILE);
+				w = SimpleFileWallet.read (KEYFILE);
 				w.unlock (password);
 				System.out.println ("Private key: " + w.getMaster ().serialize (true));
 				w.lock ();
@@ -134,7 +133,7 @@ public class KeyTool
 				new SecureRandom ().nextBytes (newpass);
 				password = ByteUtils.toBase58 (newpass);
 			}
-			FileWallet w = new FileWallet (KEYFILE);
+			SimpleFileWallet w = new SimpleFileWallet (KEYFILE);
 			w.init (password);
 			try
 			{
@@ -281,7 +280,7 @@ public class KeyTool
 				writer.writeToken (new ScriptFormat.Token (Opcode.OP_CHECKSIG));
 				o.setScript (writer.toByteArray ());
 
-				FileWallet w = FileWallet.read (KEYFILE);
+				SimpleFileWallet w = SimpleFileWallet.read (KEYFILE);
 				w.unlock (password);
 				ExtendedKey master = ((ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT)).getMaster ();
 				int j = 0;
