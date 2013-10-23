@@ -287,7 +287,16 @@ public class KeyTool
 				for ( TransactionInput i : inputs )
 				{
 					ScriptFormat.Writer sw = new ScriptFormat.Writer ();
-					Key key = master.getChild (pr.getInt ("child")).getKey (keyNumber);
+					Key key;
+					if ( keyNumber >= 0 )
+					{
+						key = master.getChild (pr.getInt ("child")).getKey (keyNumber);
+					}
+					else
+					{
+						key = master.getKey (pr.getInt ("child"));
+					}
+
 					if ( key == null )
 					{
 						throw new ValidationException ("Have no key to spend this output");
