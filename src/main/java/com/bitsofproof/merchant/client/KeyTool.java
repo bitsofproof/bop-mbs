@@ -47,6 +47,8 @@ public class KeyTool
 	private static final String ACCOUNT = "BopShop";
 	private static final String KEYFILE = "bopshop.key";
 
+	private static final String SERVER_URL = "https://api.bitsofproof.com/mbs/1";
+
 	public static void main (String[] args)
 	{
 		final CommandLineParser parser = new GnuParser ();
@@ -57,6 +59,7 @@ public class KeyTool
 		gnuOptions.addOption ("e", "email", true, "email");
 		gnuOptions.addOption ("r", "register", false, "create new key and account");
 		gnuOptions.addOption ("c", "claim", true, "claim a payment request");
+		gnuOptions.addOption ("b", "batch", false, "claim all cleared payment requests");
 		gnuOptions.addOption ("a", "address", true, "address to forward the claimed amount");
 		gnuOptions.addOption ("E", "export", false, "Export master private key");
 
@@ -69,6 +72,7 @@ public class KeyTool
 		String email = null;
 		String claim = null;
 		String address = null;
+		boolean batch = false;
 		boolean export = false;
 		boolean register = false;
 		try
@@ -81,6 +85,7 @@ public class KeyTool
 			register = cl.hasOption ('r');
 			claim = cl.getOptionValue ('c');
 			address = cl.getOptionValue ('a');
+			batch = cl.hasOption ('b');
 			export = cl.hasOption ('E');
 		}
 		catch ( org.apache.commons.cli.ParseException e )
@@ -145,7 +150,7 @@ public class KeyTool
 				String publicKey = account.getMaster ().serialize (true);
 
 				HttpClient httpclient = new DefaultHttpClient ();
-				HttpPost post = new HttpPost ("https://api.bitsofproof.com/mbs/1/account");
+				HttpPost post = new HttpPost (SERVER_URL + "/account");
 				post.setHeader ("Content-Type", "application/json");
 				JSONObject r = new JSONObject ();
 				r.put ("name", name);
@@ -185,6 +190,198 @@ public class KeyTool
 				System.exit (1);
 			}
 		}
+		if ( batch )
+		{
+			if ( user == null || password == null || address == null )
+			{
+				System.err.println ("Provide -u user -p password -a address");
+				System.exit (1);
+			}
+			try
+			{
+				HttpClient httpclient = new DefaultHttpClient ();
+				HttpGet get = new HttpGet (SERVER_URL + "/paymentRequest?state=CLEARED");
+				String authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
+				get.setHeader ("Authorization", authorizationString);
+				HttpResponse response = httpclient.execute (get);
+				String output = null;
+				if ( response.getEntity () != null )
+				{
+					BufferedReader in = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
+					StringWriter writer = new StringWriter ();
+					String line;
+					while ( (line = in.readLine ()) != null )
+					{
+						writer.write (line);
+					}
+					output = writer.toString ();
+				}
+				JSONObject prlist = new JSONObject (output);
+				List<JSONObject> itemList = new ArrayList<JSONObject> ();
+				JSONArray items = prlist.getJSONObject ("_embedded").optJSONArray ("item");
+				if ( items != null )
+				{
+					for ( int i = 0; i < items.length (); ++i )
+					{
+						itemList.add (items.getJSONObject (i));
+					}
+				}
+				else
+				{
+					itemList.add (prlist.getJSONObject ("_embedded").getJSONObject ("item"));
+				}
+
+				List<JSONObject> prs = new ArrayList<JSONObject> ();
+				for ( JSONObject item : itemList )
+				{
+					get = new HttpGet (item.getJSONObject ("_links").getJSONObject ("self").getString ("href"));
+					get.setHeader ("Authorization", authorizationString);
+					response = httpclient.execute (get);
+					output = null;
+					if ( response.getEntity () != null )
+					{
+						BufferedReader in = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
+						StringWriter writer = new StringWriter ();
+						String line;
+						while ( (line = in.readLine ()) != null )
+						{
+							writer.write (line);
+						}
+						output = writer.toString ();
+					}
+					prs.add (new JSONObject (output));
+				}
+
+				long paid = 0;
+
+				for ( JSONObject pr : prs )
+				{
+					paid += pr.getLong ("paid");
+				}
+				long fee = Math.min (10000 * (prs.size () / 4 + 1), 1000000);
+
+				Transaction t = new Transaction ();
+				List<TransactionInput> inputs = new ArrayList<TransactionInput> ();
+				t.setInputs (inputs);
+				List<TransactionOutput> outputs = new ArrayList<TransactionOutput> ();
+				t.setOutputs (outputs);
+
+				TransactionOutput o = new TransactionOutput ();
+				o.setValue (paid - fee);
+				outputs.add (o);
+				ScriptFormat.Writer writer = new ScriptFormat.Writer ();
+				writer.writeToken (new ScriptFormat.Token (Opcode.OP_DUP));
+				writer.writeToken (new ScriptFormat.Token (Opcode.OP_HASH160));
+				byte[] a = AddressConverter.fromSatoshiStyle (address, 0x0);
+				if ( a.length != 20 )
+				{
+					throw new ValidationException ("claim to an address");
+				}
+				writer.writeData (a);
+				writer.writeToken (new ScriptFormat.Token (Opcode.OP_EQUALVERIFY));
+				writer.writeToken (new ScriptFormat.Token (Opcode.OP_CHECKSIG));
+				o.setScript (writer.toByteArray ());
+
+				SimpleFileWallet w = SimpleFileWallet.read (KEYFILE);
+				w.unlock (password);
+				ExtendedKey master = ((ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT)).getMaster ();
+				List<Key> signingKeys = new ArrayList<Key> ();
+				for ( JSONObject pr : prs )
+				{
+					JSONArray events = pr.getJSONArray ("events");
+					int keyNumber = -1;
+					for ( int i = 0; i < events.length (); ++i )
+					{
+						JSONObject event = events.getJSONObject (i);
+						if ( event.getString ("eventType").equals ("CLEARED") )
+						{
+							keyNumber = event.getInt ("keyNumber");
+						}
+						else if ( event.getString ("eventType").equals ("TRANSACTION") )
+						{
+							TransactionInput in = new TransactionInput ();
+							in.setSourceHash (event.getString ("txHash"));
+							in.setIx (event.getInt ("ix"));
+							in.setScript (ByteUtils.fromHex (event.getString ("script")));
+
+							boolean duplicate = false;
+							for ( TransactionInput c : inputs )
+							{
+								if ( c.getSourceHash ().equals (in.getSourceHash ()) && c.getIx () == in.getIx () )
+								{
+									duplicate = true;
+								}
+							}
+							if ( !duplicate )
+							{
+								inputs.add (in);
+								Key key;
+								if ( keyNumber >= 0 )
+								{
+									key = master.getChild (pr.getInt ("child")).getKey (keyNumber);
+								}
+								else
+								{
+									key = master.getKey (pr.getInt ("child"));
+								}
+								signingKeys.add (key);
+							}
+						}
+					}
+				}
+				int j = 0;
+				for ( TransactionInput i : inputs )
+				{
+					ScriptFormat.Writer sw = new ScriptFormat.Writer ();
+					Key key = signingKeys.get (j);
+					byte[] sig = key.sign (hashTransaction (t, j, ScriptFormat.SIGHASH_ALL, i.getScript ()));
+					byte[] sigPlusType = new byte[sig.length + 1];
+					System.arraycopy (sig, 0, sigPlusType, 0, sig.length);
+					sigPlusType[sigPlusType.length - 1] = (byte) (ScriptFormat.SIGHASH_ALL & 0xff);
+					sw.writeData (sigPlusType);
+					sw.writeData (key.getPublic ());
+					i.setScript (sw.toByteArray ());
+					++j;
+				}
+
+				System.out.println ("Sending " + o.getValue () + " satoshis to " + address);
+				HttpPost post = new HttpPost (SERVER_URL + "/route");
+				post.setHeader ("Content-Type", "application/json");
+				authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
+				post.setHeader ("Authorization", authorizationString);
+				JSONObject r = new JSONObject ();
+				r.put ("transaction", t.toWireDump ());
+				post.setEntity (new StringEntity (r.toString ()));
+				response = httpclient.execute (post);
+				if ( response.getEntity () != null )
+				{
+					BufferedReader in = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
+					StringWriter wr = new StringWriter ();
+					String line;
+					while ( (line = in.readLine ()) != null )
+					{
+						wr.write (line);
+					}
+					System.out.println ("Sent transaction: " + wr.toString ());
+				}
+			}
+			catch ( IOException e )
+			{
+				e.printStackTrace ();
+				System.exit (1);
+			}
+			catch ( ValidationException e )
+			{
+				e.printStackTrace ();
+				System.exit (1);
+			}
+			catch ( JSONException e )
+			{
+				e.printStackTrace ();
+				System.exit (1);
+			}
+			System.exit (0);
+		}
 		if ( claim != null )
 		{
 			if ( user == null || password == null || address == null )
@@ -195,7 +392,7 @@ public class KeyTool
 			try
 			{
 				HttpClient httpclient = new DefaultHttpClient ();
-				HttpGet get = new HttpGet ("https://api.bitsofproof.com/mbs/1/paymentRequest/" + claim);
+				HttpGet get = new HttpGet (SERVER_URL + "/paymentRequest/" + claim);
 				String authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
 				get.setHeader ("Authorization", authorizationString);
 				HttpResponse response = httpclient.execute (get);
@@ -283,24 +480,24 @@ public class KeyTool
 				SimpleFileWallet w = SimpleFileWallet.read (KEYFILE);
 				w.unlock (password);
 				ExtendedKey master = ((ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT)).getMaster ();
+				Key key;
+				if ( keyNumber >= 0 )
+				{
+					key = master.getChild (pr.getInt ("child")).getKey (keyNumber);
+				}
+				else
+				{
+					key = master.getKey (pr.getInt ("child"));
+				}
+
+				if ( key == null )
+				{
+					throw new ValidationException ("Have no key to spend this output");
+				}
 				int j = 0;
 				for ( TransactionInput i : inputs )
 				{
 					ScriptFormat.Writer sw = new ScriptFormat.Writer ();
-					Key key;
-					if ( keyNumber >= 0 )
-					{
-						key = master.getChild (pr.getInt ("child")).getKey (keyNumber);
-					}
-					else
-					{
-						key = master.getKey (pr.getInt ("child"));
-					}
-
-					if ( key == null )
-					{
-						throw new ValidationException ("Have no key to spend this output");
-					}
 					byte[] sig = key.sign (hashTransaction (t, j, ScriptFormat.SIGHASH_ALL, i.getScript ()));
 					byte[] sigPlusType = new byte[sig.length + 1];
 					System.arraycopy (sig, 0, sigPlusType, 0, sig.length);
@@ -311,7 +508,7 @@ public class KeyTool
 					++j;
 				}
 				System.out.println ("Sending " + o.getValue () + " satoshis to " + address);
-				HttpPost post = new HttpPost ("https://api.bitsofproof.com/mbs/1/route");
+				HttpPost post = new HttpPost (SERVER_URL + "/route");
 				post.setHeader ("Content-Type", "application/json");
 				authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
 				post.setHeader ("Authorization", authorizationString);

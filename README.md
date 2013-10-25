@@ -36,6 +36,10 @@ At this point you may use this utility to transfer the funds to their destinatio
 
        java -Djavax.net.ssl.trustStore=netlock.trust -jar target/bop-mbs-2.0.jar -u userid -p password -c requestid -a youraddress
        
+alternatively you may claim all outstanding CLEARED payment requests in a single transaction:
+
+         java -Djavax.net.ssl.trustStore=netlock.trust -jar target/bop-mbs-2.0.jar -u userid -p password -b -a youraddress
+       
 Java 7 remarks
 --------------
 In case you receive:
