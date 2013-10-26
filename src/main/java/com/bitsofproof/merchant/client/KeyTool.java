@@ -253,8 +253,8 @@ public class KeyTool
 							writer.write (line);
 						}
 						output = writer.toString ();
+						prs.add (new JSONObject (output));
 					}
-					prs.add (new JSONObject (output));
 				}
 
 				long paid = 0;
@@ -264,6 +264,11 @@ public class KeyTool
 					paid += pr.getLong ("paid");
 				}
 				long fee = Math.min (10000 * (prs.size () / 4 + 1), 1000000);
+				if ( paid == 0 || (paid - fee) <= 0 )
+				{
+					System.err.println ("Nothing left to claim.");
+					System.exit (0);
+				}
 
 				Transaction t = new Transaction ();
 				List<TransactionInput> inputs = new ArrayList<TransactionInput> ();
@@ -399,134 +404,132 @@ public class KeyTool
 				String output = null;
 				if ( response.getEntity () != null )
 				{
-					BufferedReader in = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
+					BufferedReader inr = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
 					StringWriter writer = new StringWriter ();
 					String line;
-					while ( (line = in.readLine ()) != null )
+					while ( (line = inr.readLine ()) != null )
 					{
 						writer.write (line);
 					}
 					output = writer.toString ();
-				}
-				JSONObject pr = new JSONObject (output);
+					JSONObject pr = new JSONObject (output);
 
-				if ( !pr.getString ("state").equals ("CLEARED") )
-				{
-					if ( pr.getString ("state").equals ("PAID") )
+					if ( !pr.getString ("state").equals ("CLEARED") )
 					{
-						System.err.println ("The provision of " + pr.getLong ("provisionAmount") + " is not yet paid to " + pr.getString ("provisionAddress"));
-						System.exit (1);
-					}
-					else if ( pr.getString ("state").equals ("CLAIMED") )
-					{
-						System.err.println ("This payment request was already claimed");
-						System.exit (1);
-					}
-
-					System.err.println ("This payment request was not paid");
-					System.exit (1);
-				}
-
-				SimpleFileWallet w = SimpleFileWallet.read (KEYFILE);
-				w.unlock (password);
-				ExtendedKey master = ((ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT)).getMaster ();
-				Key key;
-				if ( pr.has ("keyNumber") )
-				{
-					key = master.getChild (pr.getInt ("child")).getKey (pr.getInt ("keyNumber"));
-				}
-				else
-				{
-					key = master.getKey (pr.getInt ("child"));
-				}
-
-				if ( key == null )
-				{
-					throw new ValidationException ("Have no key to spend this output");
-				}
-
-				long fee = 10000;
-
-				Transaction t = new Transaction ();
-				List<TransactionInput> inputs = new ArrayList<TransactionInput> ();
-				t.setInputs (inputs);
-				List<TransactionOutput> outputs = new ArrayList<TransactionOutput> ();
-				t.setOutputs (outputs);
-				JSONArray events = pr.getJSONArray ("events");
-				for ( int i = 0; i < events.length (); ++i )
-				{
-					JSONObject event = events.getJSONObject (i);
-					if ( event.getString ("eventType").equals ("TRANSACTION") )
-					{
-						TransactionInput in = new TransactionInput ();
-						in.setSourceHash (event.getString ("txHash"));
-						in.setIx (event.getInt ("ix"));
-						in.setScript (ByteUtils.fromHex (event.getString ("script")));
-
-						boolean duplicate = false;
-						for ( TransactionInput c : inputs )
+						if ( pr.getString ("state").equals ("PAID") )
 						{
-							if ( c.getSourceHash ().equals (in.getSourceHash ()) && c.getIx () == in.getIx () )
+							System.err.println ("The provision of " + pr.getLong ("provisionAmount") + " is not yet paid to " + pr.getString ("provisionAddress"));
+							System.exit (1);
+						}
+						else if ( pr.getString ("state").equals ("CLAIMED") )
+						{
+							System.err.println ("This payment request was already claimed");
+							System.exit (1);
+						}
+
+						System.err.println ("This payment request was not paid");
+						System.exit (1);
+					}
+
+					SimpleFileWallet w = SimpleFileWallet.read (KEYFILE);
+					w.unlock (password);
+					ExtendedKey master = ((ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT)).getMaster ();
+					Key key;
+					if ( pr.has ("keyNumber") )
+					{
+						key = master.getChild (pr.getInt ("child")).getKey (pr.getInt ("keyNumber"));
+					}
+					else
+					{
+						key = master.getKey (pr.getInt ("child"));
+					}
+
+					if ( key == null )
+					{
+						throw new ValidationException ("Have no key to spend this output");
+					}
+
+					long fee = 10000;
+
+					Transaction t = new Transaction ();
+					List<TransactionInput> inputs = new ArrayList<TransactionInput> ();
+					t.setInputs (inputs);
+					List<TransactionOutput> outputs = new ArrayList<TransactionOutput> ();
+					t.setOutputs (outputs);
+					JSONArray events = pr.getJSONArray ("events");
+					for ( int i = 0; i < events.length (); ++i )
+					{
+						JSONObject event = events.getJSONObject (i);
+						if ( event.getString ("eventType").equals ("TRANSACTION") )
+						{
+							TransactionInput in = new TransactionInput ();
+							in.setSourceHash (event.getString ("txHash"));
+							in.setIx (event.getInt ("ix"));
+							in.setScript (ByteUtils.fromHex (event.getString ("script")));
+
+							boolean duplicate = false;
+							for ( TransactionInput c : inputs )
 							{
-								duplicate = true;
+								if ( c.getSourceHash ().equals (in.getSourceHash ()) && c.getIx () == in.getIx () )
+								{
+									duplicate = true;
+								}
+							}
+							if ( !duplicate )
+							{
+								inputs.add (in);
 							}
 						}
-						if ( !duplicate )
-						{
-							inputs.add (in);
-						}
 					}
-				}
-				TransactionOutput o = new TransactionOutput ();
-				o.setValue (pr.getLong ("paid") - fee);
-				outputs.add (o);
-				ScriptFormat.Writer writer = new ScriptFormat.Writer ();
-				writer.writeToken (new ScriptFormat.Token (Opcode.OP_DUP));
-				writer.writeToken (new ScriptFormat.Token (Opcode.OP_HASH160));
-				byte[] a = AddressConverter.fromSatoshiStyle (address, 0x0);
-				if ( a.length != 20 )
-				{
-					throw new ValidationException ("claim to an address");
-				}
-				writer.writeData (a);
-				writer.writeToken (new ScriptFormat.Token (Opcode.OP_EQUALVERIFY));
-				writer.writeToken (new ScriptFormat.Token (Opcode.OP_CHECKSIG));
-				o.setScript (writer.toByteArray ());
-
-				int j = 0;
-				for ( TransactionInput i : inputs )
-				{
+					TransactionOutput o = new TransactionOutput ();
+					o.setValue (pr.getLong ("paid") - fee);
+					outputs.add (o);
 					ScriptFormat.Writer sw = new ScriptFormat.Writer ();
-					byte[] sig = key.sign (hashTransaction (t, j, ScriptFormat.SIGHASH_ALL, i.getScript ()));
-					byte[] sigPlusType = new byte[sig.length + 1];
-					System.arraycopy (sig, 0, sigPlusType, 0, sig.length);
-					sigPlusType[sigPlusType.length - 1] = (byte) (ScriptFormat.SIGHASH_ALL & 0xff);
-					sw.writeData (sigPlusType);
-					sw.writeData (key.getPublic ());
-					i.setScript (sw.toByteArray ());
-					++j;
-				}
-				System.out.println ("Sending " + o.getValue () + " satoshis to " + address);
-				HttpPost post = new HttpPost (SERVER_URL + "/route");
-				post.setHeader ("Content-Type", "application/json");
-				authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
-				post.setHeader ("Authorization", authorizationString);
-				JSONObject r = new JSONObject ();
-				r.put ("transaction", t.toWireDump ());
-				post.setEntity (new StringEntity (r.toString ()));
-				response = httpclient.execute (post);
-				if ( response.getEntity () != null )
-				{
-					BufferedReader in = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
-					StringWriter wr = new StringWriter ();
-					String line;
-					while ( (line = in.readLine ()) != null )
+					sw.writeToken (new ScriptFormat.Token (Opcode.OP_DUP));
+					sw.writeToken (new ScriptFormat.Token (Opcode.OP_HASH160));
+					byte[] a = AddressConverter.fromSatoshiStyle (address, 0x0);
+					if ( a.length != 20 )
 					{
-						wr.write (line);
+						throw new ValidationException ("claim to an address");
 					}
-					System.out.println ("Sent transaction: " + wr.toString ());
-				}
+					sw.writeData (a);
+					sw.writeToken (new ScriptFormat.Token (Opcode.OP_EQUALVERIFY));
+					sw.writeToken (new ScriptFormat.Token (Opcode.OP_CHECKSIG));
+					o.setScript (sw.toByteArray ());
 
+					int j = 0;
+					for ( TransactionInput i : inputs )
+					{
+						sw = new ScriptFormat.Writer ();
+						byte[] sig = key.sign (hashTransaction (t, j, ScriptFormat.SIGHASH_ALL, i.getScript ()));
+						byte[] sigPlusType = new byte[sig.length + 1];
+						System.arraycopy (sig, 0, sigPlusType, 0, sig.length);
+						sigPlusType[sigPlusType.length - 1] = (byte) (ScriptFormat.SIGHASH_ALL & 0xff);
+						sw.writeData (sigPlusType);
+						sw.writeData (key.getPublic ());
+						i.setScript (sw.toByteArray ());
+						++j;
+					}
+					System.out.println ("Sending " + o.getValue () + " satoshis to " + address);
+					HttpPost post = new HttpPost (SERVER_URL + "/route");
+					post.setHeader ("Content-Type", "application/json");
+					authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
+					post.setHeader ("Authorization", authorizationString);
+					JSONObject r = new JSONObject ();
+					r.put ("transaction", t.toWireDump ());
+					post.setEntity (new StringEntity (r.toString ()));
+					response = httpclient.execute (post);
+					if ( response.getEntity () != null )
+					{
+						BufferedReader in = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
+						StringWriter wr = new StringWriter ();
+						while ( (line = in.readLine ()) != null )
+						{
+							wr.write (line);
+						}
+						System.out.println ("Sent transaction: " + wr.toString ());
+					}
+				}
 			}
 			catch ( IOException e )
 			{
