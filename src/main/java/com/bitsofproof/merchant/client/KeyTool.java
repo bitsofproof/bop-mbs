@@ -218,6 +218,11 @@ public class KeyTool
 				}
 				JSONObject prlist = new JSONObject (output);
 				List<JSONObject> itemList = new ArrayList<JSONObject> ();
+				if ( !prlist.has ("_embedded") )
+				{
+					System.err.println ("Nothing to claim.");
+					System.exit (0);
+				}
 				JSONArray items = prlist.getJSONObject ("_embedded").optJSONArray ("item");
 				if ( items != null )
 				{
@@ -289,15 +294,19 @@ public class KeyTool
 				for ( JSONObject pr : prs )
 				{
 					JSONArray events = pr.getJSONArray ("events");
-					int keyNumber = -1;
+					Key key;
+					if ( pr.has ("keyNumber") )
+					{
+						key = master.getChild (pr.getInt ("child")).getKey (pr.getInt ("keyNumber"));
+					}
+					else
+					{
+						key = master.getKey (pr.getInt ("child"));
+					}
 					for ( int i = 0; i < events.length (); ++i )
 					{
 						JSONObject event = events.getJSONObject (i);
-						if ( event.getString ("eventType").equals ("CLEARED") )
-						{
-							keyNumber = event.getInt ("keyNumber");
-						}
-						else if ( event.getString ("eventType").equals ("TRANSACTION") )
+						if ( event.getString ("eventType").equals ("TRANSACTION") )
 						{
 							TransactionInput in = new TransactionInput ();
 							in.setSourceHash (event.getString ("txHash"));
@@ -315,15 +324,6 @@ public class KeyTool
 							if ( !duplicate )
 							{
 								inputs.add (in);
-								Key key;
-								if ( keyNumber >= 0 )
-								{
-									key = master.getChild (pr.getInt ("child")).getKey (keyNumber);
-								}
-								else
-								{
-									key = master.getKey (pr.getInt ("child"));
-								}
 								signingKeys.add (key);
 							}
 						}
@@ -417,11 +417,32 @@ public class KeyTool
 						System.err.println ("The provision of " + pr.getLong ("provisionAmount") + " is not yet paid to " + pr.getString ("provisionAddress"));
 						System.exit (1);
 					}
-					else
+					else if ( pr.getString ("state").equals ("CLAIMED") )
 					{
-						System.err.println ("This payment request was not paid");
+						System.err.println ("This payment request was already claimed");
 						System.exit (1);
 					}
+
+					System.err.println ("This payment request was not paid");
+					System.exit (1);
+				}
+
+				SimpleFileWallet w = SimpleFileWallet.read (KEYFILE);
+				w.unlock (password);
+				ExtendedKey master = ((ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT)).getMaster ();
+				Key key;
+				if ( pr.has ("keyNumber") )
+				{
+					key = master.getChild (pr.getInt ("child")).getKey (pr.getInt ("keyNumber"));
+				}
+				else
+				{
+					key = master.getKey (pr.getInt ("child"));
+				}
+
+				if ( key == null )
+				{
+					throw new ValidationException ("Have no key to spend this output");
 				}
 
 				long fee = 10000;
@@ -432,15 +453,10 @@ public class KeyTool
 				List<TransactionOutput> outputs = new ArrayList<TransactionOutput> ();
 				t.setOutputs (outputs);
 				JSONArray events = pr.getJSONArray ("events");
-				int keyNumber = -1;
 				for ( int i = 0; i < events.length (); ++i )
 				{
 					JSONObject event = events.getJSONObject (i);
-					if ( event.getString ("eventType").equals ("CLEARED") )
-					{
-						keyNumber = event.getInt ("keyNumber");
-					}
-					else if ( event.getString ("eventType").equals ("TRANSACTION") )
+					if ( event.getString ("eventType").equals ("TRANSACTION") )
 					{
 						TransactionInput in = new TransactionInput ();
 						in.setSourceHash (event.getString ("txHash"));
@@ -477,23 +493,6 @@ public class KeyTool
 				writer.writeToken (new ScriptFormat.Token (Opcode.OP_CHECKSIG));
 				o.setScript (writer.toByteArray ());
 
-				SimpleFileWallet w = SimpleFileWallet.read (KEYFILE);
-				w.unlock (password);
-				ExtendedKey master = ((ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT)).getMaster ();
-				Key key;
-				if ( keyNumber >= 0 )
-				{
-					key = master.getChild (pr.getInt ("child")).getKey (keyNumber);
-				}
-				else
-				{
-					key = master.getKey (pr.getInt ("child"));
-				}
-
-				if ( key == null )
-				{
-					throw new ValidationException ("Have no key to spend this output");
-				}
 				int j = 0;
 				for ( TransactionInput i : inputs )
 				{
