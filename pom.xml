@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.bitsofproof</groupId>
 	<artifactId>bop-mbs</artifactId>
-	<version>2.0</version>
+	<version>2.1</version>
 	<name>bop-mbs</name>
 	<description>Utility for the BOP Merchant Bitcoin Server</description>
 	<packaging>jar</packaging>

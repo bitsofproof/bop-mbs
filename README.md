@@ -25,18 +25,14 @@ password: CAecrLrVoenKeG
 Google authenticator secret: UO4WVC3EVYY4IVXK
 
 You will need the user id and password to authenticate while using the server API. The password is also used to encrypt the master key, now stored in the file bopshop.key.
+The server receives the public master key during registration, but not the private key. Payment requests will be using addresses derived from the public master key. Payments to those addresses can only be claimed with the private key stored in the bopshop.key file.
 
 The google authenticator secret is a random string you may import into a google authenticator to create one time tokens (time depending) for API calls the server require this authentication level.
-The public key is displayed just for your reference. All payment requests the server generates for your requests use addresses that are derivable from this public key.
 
 Claim funds collected
 ---------------------
 Once a payment request is paid by your customer and the BOP provision is paid by you, the payment request will move into the state CLEARED.
-At this point you may use this utility to transfer the funds to their destination address (e.g. cold storage) as follows:
-
-       java -Djavax.net.ssl.trustStore=netlock.trust -jar target/bop-mbs-2.0.jar -u userid -p password -c requestid -a youraddress
-       
-alternatively you may claim all outstanding CLEARED payment requests in a single transaction:
+Claim all outstanding CLEARED payment requests in a single transaction:
 
          java -Djavax.net.ssl.trustStore=netlock.trust -jar target/bop-mbs-2.0.jar -u userid -p password -b -a youraddress
        

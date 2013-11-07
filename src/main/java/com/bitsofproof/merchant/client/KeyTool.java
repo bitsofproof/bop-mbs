@@ -10,7 +10,9 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.Security;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -58,19 +60,17 @@ public class KeyTool
 		gnuOptions.addOption ("n", "name", true, "name");
 		gnuOptions.addOption ("e", "email", true, "email");
 		gnuOptions.addOption ("r", "register", false, "create new key and account");
-		gnuOptions.addOption ("c", "claim", true, "claim a payment request");
 		gnuOptions.addOption ("b", "batch", false, "claim all cleared payment requests");
 		gnuOptions.addOption ("a", "address", true, "address to forward the claimed amount");
 		gnuOptions.addOption ("E", "export", false, "Export master private key");
 
-		System.out.println ("BOP Merchant Server Client 2.0 (c) 2013 bits of proof zrt.");
+		System.out.println ("BOP Merchant Server Client 2.1 (c) 2013 bits of proof zrt.");
 		Security.addProvider (new BouncyCastleProvider ());
 		CommandLine cl = null;
 		String user = null;
 		String password = null;
 		String name = null;
 		String email = null;
-		String claim = null;
 		String address = null;
 		boolean batch = false;
 		boolean export = false;
@@ -83,7 +83,6 @@ public class KeyTool
 			user = cl.getOptionValue ('u');
 			password = cl.getOptionValue ('p');
 			register = cl.hasOption ('r');
-			claim = cl.getOptionValue ('c');
 			address = cl.getOptionValue ('a');
 			batch = cl.hasOption ('b');
 			export = cl.hasOption ('E');
@@ -259,8 +258,18 @@ public class KeyTool
 
 				long paid = 0;
 
+				Map<String, Long> provision = new HashMap<String, Long> ();
 				for ( JSONObject pr : prs )
 				{
+					Long p = pr.getLong ("provisionAmount");
+					if ( pr.has ("provisionPaid") )
+					{
+						p -= pr.getLong ("provisionPaid");
+					}
+					if ( p > 0 )
+					{
+						provision.put (pr.getString ("provisionAddress"), p);
+					}
 					paid += pr.getLong ("paid");
 				}
 				long fee = Math.min (10000 * (prs.size () / 4 + 1), 1000000);
@@ -276,21 +285,20 @@ public class KeyTool
 				List<TransactionOutput> outputs = new ArrayList<TransactionOutput> ();
 				t.setOutputs (outputs);
 
-				TransactionOutput o = new TransactionOutput ();
-				o.setValue (paid - fee);
-				outputs.add (o);
-				ScriptFormat.Writer writer = new ScriptFormat.Writer ();
-				writer.writeToken (new ScriptFormat.Token (Opcode.OP_DUP));
-				writer.writeToken (new ScriptFormat.Token (Opcode.OP_HASH160));
-				byte[] a = AddressConverter.fromSatoshiStyle (address, 0x0);
-				if ( a.length != 20 )
+				long pp = 0;
+				for ( Map.Entry<String, Long> p : provision.entrySet () )
 				{
-					throw new ValidationException ("claim to an address");
+					TransactionOutput o = new TransactionOutput ();
+					o.setValue (p.getValue ());
+					writeOutputScript (p.getKey (), o);
+					outputs.add (o);
+					pp += p.getValue ();
 				}
-				writer.writeData (a);
-				writer.writeToken (new ScriptFormat.Token (Opcode.OP_EQUALVERIFY));
-				writer.writeToken (new ScriptFormat.Token (Opcode.OP_CHECKSIG));
-				o.setScript (writer.toByteArray ());
+
+				TransactionOutput o = new TransactionOutput ();
+				o.setValue (paid - fee - pp);
+				outputs.add (o);
+				writeOutputScript (address, o);
 
 				SimpleFileWallet w = SimpleFileWallet.read (KEYFILE);
 				w.unlock (password);
@@ -387,167 +395,23 @@ public class KeyTool
 			}
 			System.exit (0);
 		}
-		if ( claim != null )
-		{
-			if ( user == null || password == null || address == null )
-			{
-				System.err.println ("Provide -u user -p password -a address");
-				System.exit (1);
-			}
-			try
-			{
-				HttpClient httpclient = new DefaultHttpClient ();
-				HttpGet get = new HttpGet (SERVER_URL + "/paymentRequest/" + claim);
-				String authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
-				get.setHeader ("Authorization", authorizationString);
-				HttpResponse response = httpclient.execute (get);
-				String output = null;
-				if ( response.getEntity () != null )
-				{
-					BufferedReader inr = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
-					StringWriter writer = new StringWriter ();
-					String line;
-					while ( (line = inr.readLine ()) != null )
-					{
-						writer.write (line);
-					}
-					output = writer.toString ();
-					JSONObject pr = new JSONObject (output);
-
-					if ( !pr.getString ("state").equals ("CLEARED") )
-					{
-						if ( pr.getString ("state").equals ("PAID") )
-						{
-							System.err.println ("The provision of " + pr.getLong ("provisionAmount") + " is not yet paid to " + pr.getString ("provisionAddress"));
-							System.exit (1);
-						}
-						else if ( pr.getString ("state").equals ("CLAIMED") )
-						{
-							System.err.println ("This payment request was already claimed");
-							System.exit (1);
-						}
-
-						System.err.println ("This payment request was not paid");
-						System.exit (1);
-					}
-
-					SimpleFileWallet w = SimpleFileWallet.read (KEYFILE);
-					w.unlock (password);
-					ExtendedKey master = ((ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT)).getMaster ();
-					Key key;
-					if ( pr.has ("keyNumber") )
-					{
-						key = master.getChild (pr.getInt ("child")).getKey (pr.getInt ("keyNumber"));
-					}
-					else
-					{
-						key = master.getKey (pr.getInt ("child"));
-					}
-
-					if ( key == null )
-					{
-						throw new ValidationException ("Have no key to spend this output");
-					}
-
-					long fee = 10000;
-
-					Transaction t = new Transaction ();
-					List<TransactionInput> inputs = new ArrayList<TransactionInput> ();
-					t.setInputs (inputs);
-					List<TransactionOutput> outputs = new ArrayList<TransactionOutput> ();
-					t.setOutputs (outputs);
-					JSONArray events = pr.getJSONArray ("events");
-					for ( int i = 0; i < events.length (); ++i )
-					{
-						JSONObject event = events.getJSONObject (i);
-						if ( event.getString ("eventType").equals ("TRANSACTION") )
-						{
-							TransactionInput in = new TransactionInput ();
-							in.setSourceHash (event.getString ("txHash"));
-							in.setIx (event.getInt ("ix"));
-							in.setScript (ByteUtils.fromHex (event.getString ("script")));
-
-							boolean duplicate = false;
-							for ( TransactionInput c : inputs )
-							{
-								if ( c.getSourceHash ().equals (in.getSourceHash ()) && c.getIx () == in.getIx () )
-								{
-									duplicate = true;
-								}
-							}
-							if ( !duplicate )
-							{
-								inputs.add (in);
-							}
-						}
-					}
-					TransactionOutput o = new TransactionOutput ();
-					o.setValue (pr.getLong ("paid") - fee);
-					outputs.add (o);
-					ScriptFormat.Writer sw = new ScriptFormat.Writer ();
-					sw.writeToken (new ScriptFormat.Token (Opcode.OP_DUP));
-					sw.writeToken (new ScriptFormat.Token (Opcode.OP_HASH160));
-					byte[] a = AddressConverter.fromSatoshiStyle (address, 0x0);
-					if ( a.length != 20 )
-					{
-						throw new ValidationException ("claim to an address");
-					}
-					sw.writeData (a);
-					sw.writeToken (new ScriptFormat.Token (Opcode.OP_EQUALVERIFY));
-					sw.writeToken (new ScriptFormat.Token (Opcode.OP_CHECKSIG));
-					o.setScript (sw.toByteArray ());
-
-					int j = 0;
-					for ( TransactionInput i : inputs )
-					{
-						sw = new ScriptFormat.Writer ();
-						byte[] sig = key.sign (hashTransaction (t, j, ScriptFormat.SIGHASH_ALL, i.getScript ()));
-						byte[] sigPlusType = new byte[sig.length + 1];
-						System.arraycopy (sig, 0, sigPlusType, 0, sig.length);
-						sigPlusType[sigPlusType.length - 1] = (byte) (ScriptFormat.SIGHASH_ALL & 0xff);
-						sw.writeData (sigPlusType);
-						sw.writeData (key.getPublic ());
-						i.setScript (sw.toByteArray ());
-						++j;
-					}
-					System.out.println ("Sending " + o.getValue () + " satoshis to " + address);
-					HttpPost post = new HttpPost (SERVER_URL + "/route");
-					post.setHeader ("Content-Type", "application/json");
-					authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
-					post.setHeader ("Authorization", authorizationString);
-					JSONObject r = new JSONObject ();
-					r.put ("transaction", t.toWireDump ());
-					post.setEntity (new StringEntity (r.toString ()));
-					response = httpclient.execute (post);
-					if ( response.getEntity () != null )
-					{
-						BufferedReader in = new BufferedReader (new InputStreamReader (response.getEntity ().getContent (), "UTF-8"));
-						StringWriter wr = new StringWriter ();
-						while ( (line = in.readLine ()) != null )
-						{
-							wr.write (line);
-						}
-						System.out.println ("Sent transaction: " + wr.toString ());
-					}
-				}
-			}
-			catch ( IOException e )
-			{
-				e.printStackTrace ();
-				System.exit (1);
-			}
-			catch ( ValidationException e )
-			{
-				e.printStackTrace ();
-				System.exit (1);
-			}
-			catch ( JSONException e )
-			{
-				e.printStackTrace ();
-				System.exit (1);
-			}
-		}
 		System.exit (0);
+	}
+
+	private static void writeOutputScript (String address, TransactionOutput o) throws ValidationException
+	{
+		ScriptFormat.Writer writer = new ScriptFormat.Writer ();
+		writer.writeToken (new ScriptFormat.Token (Opcode.OP_DUP));
+		writer.writeToken (new ScriptFormat.Token (Opcode.OP_HASH160));
+		byte[] a = AddressConverter.fromSatoshiStyle (address, 0x0);
+		if ( a.length != 20 )
+		{
+			throw new ValidationException ("claim to an address");
+		}
+		writer.writeData (a);
+		writer.writeToken (new ScriptFormat.Token (Opcode.OP_EQUALVERIFY));
+		writer.writeToken (new ScriptFormat.Token (Opcode.OP_CHECKSIG));
+		o.setScript (writer.toByteArray ());
 	}
 
 	private static byte[] hashTransaction (Transaction transaction, int inr, int hashType, byte[] script) throws ValidationException
