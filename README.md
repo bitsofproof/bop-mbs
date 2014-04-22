@@ -21,7 +21,7 @@ Binary distribution
 
 Binary distribution of this tool is available on 
 
-https://bitsofproof.com/nexus/content/repositories/releases/com/bitsofproof/bop-mbs/2.2/bop-mbs-2.2-shaded.jar
+https://bitsofproof.com/nexus/content/repositories/releases/com/bitsofproof/bop-mbs/2.2/bop-mbs-2.2-distribution.zip
 
 
 Register with the server
@@ -72,4 +72,4 @@ Build
 
     mvn package    
 
-you find the bop-mbs-2.2-shaded.jar in the target directory, refer to it in above command lines with target/bop-mbs-2.2-shaded.jar
+you find the bop-mbs-2.2.jar in the target directory, refer to it in above command lines with target/bop-mbs-2.2.jar
