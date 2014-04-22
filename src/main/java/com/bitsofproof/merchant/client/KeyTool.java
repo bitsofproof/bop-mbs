@@ -133,7 +133,8 @@ public class KeyTool
 			{
 				w = SimpleFileWallet.read (KEYFILE);
 				w.unlock (password);
-				System.out.println ("Private key: " + w.getMaster ().getKey (Integer.valueOf (late)));
+				ExtendedKey master = ((ExtendedKeyAccountManager) w.getAccountManager (ACCOUNT)).getMaster ();
+				System.out.println ("Private key: " + master.getKey (Integer.valueOf (late)));
 				w.lock ();
 			}
 			catch ( IOException e )
