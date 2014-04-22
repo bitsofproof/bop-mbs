@@ -30,6 +30,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import com.bitsofproof.supernode.account.ExtendedKeyAccountManager;
+import com.bitsofproof.supernode.api.Address;
 import com.bitsofproof.supernode.api.Transaction;
 import com.bitsofproof.supernode.api.TransactionInput;
 import com.bitsofproof.supernode.api.TransactionOutput;
@@ -40,9 +42,7 @@ import com.bitsofproof.supernode.common.ScriptFormat;
 import com.bitsofproof.supernode.common.ScriptFormat.Opcode;
 import com.bitsofproof.supernode.common.ValidationException;
 import com.bitsofproof.supernode.common.WireFormat;
-import com.bitsofproof.supernode.wallet.AddressConverter;
-import com.bitsofproof.supernode.wallet.ExtendedKeyAccountManager;
-import com.bitsofproof.supernode.wallet.SimpleFileWallet;
+import com.bitsofproof.supernode.misc.SimpleFileWallet;
 
 public class KeyTool
 {
@@ -63,8 +63,9 @@ public class KeyTool
 		gnuOptions.addOption ("b", "batch", false, "claim all cleared payment requests");
 		gnuOptions.addOption ("a", "address", true, "address to forward the claimed amount");
 		gnuOptions.addOption ("E", "export", false, "Export master private key");
+		gnuOptions.addOption ("l", "late", true, "extract key for a late payment");
 
-		System.out.println ("BOP Merchant Server Client 2.1 (c) 2013 bits of proof zrt.");
+		System.out.println ("BOP Merchant Server Client 2.2 (c) 2013 bits of proof zrt.");
 		Security.addProvider (new BouncyCastleProvider ());
 		CommandLine cl = null;
 		String user = null;
@@ -72,6 +73,7 @@ public class KeyTool
 		String name = null;
 		String email = null;
 		String address = null;
+		String late = null;
 		boolean batch = false;
 		boolean export = false;
 		boolean register = false;
@@ -84,6 +86,7 @@ public class KeyTool
 			password = cl.getOptionValue ('p');
 			register = cl.hasOption ('r');
 			address = cl.getOptionValue ('a');
+			late = cl.getOptionValue ('l');
 			batch = cl.hasOption ('b');
 			export = cl.hasOption ('E');
 		}
@@ -105,6 +108,32 @@ public class KeyTool
 				w = SimpleFileWallet.read (KEYFILE);
 				w.unlock (password);
 				System.out.println ("Private key: " + w.getMaster ().serialize (true));
+				w.lock ();
+			}
+			catch ( IOException e )
+			{
+				e.printStackTrace ();
+				System.exit (1);
+			}
+			catch ( ValidationException e )
+			{
+				e.printStackTrace ();
+				System.exit (1);
+			}
+		}
+		else if ( late != null )
+		{
+			if ( password == null )
+			{
+				System.err.println ("also support -p password");
+				System.exit (1);
+			}
+			SimpleFileWallet w;
+			try
+			{
+				w = SimpleFileWallet.read (KEYFILE);
+				w.unlock (password);
+				System.out.println ("Private key: " + w.getMaster ().getKey (Integer.valueOf (late)));
 				w.lock ();
 			}
 			catch ( IOException e )
@@ -189,7 +218,7 @@ public class KeyTool
 				System.exit (1);
 			}
 		}
-		if ( batch )
+		else if ( batch )
 		{
 			if ( user == null || password == null || address == null )
 			{
@@ -403,7 +432,7 @@ public class KeyTool
 		ScriptFormat.Writer writer = new ScriptFormat.Writer ();
 		writer.writeToken (new ScriptFormat.Token (Opcode.OP_DUP));
 		writer.writeToken (new ScriptFormat.Token (Opcode.OP_HASH160));
-		byte[] a = AddressConverter.fromSatoshiStyle (address, 0x0);
+		byte[] a = Address.fromSatoshiStyle (address).toByteArray ();
 		if ( a.length != 20 )
 		{
 			throw new ValidationException ("claim to an address");

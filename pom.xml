@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.bitsofproof</groupId>
 	<artifactId>bop-mbs</artifactId>
-	<version>2.1</version>
+	<version>2.2-SNAPSHOT</version>
 	<name>bop-mbs</name>
 	<description>Utility for the BOP Merchant Bitcoin Server</description>
 	<packaging>jar</packaging>
@@ -27,18 +27,11 @@
 		</developer>
 	</developers>
 
-	<repositories>
-		<repository>
-			<id>bitsofproof</id>
-			<name>bop Enterprise Bitcoin Server Repository</name>
-			<url>http://maven.bitsofproof.com/maven</url>
-		</repository>
-	</repositories>
-
 	<properties>
-		<bop.api.version>1.2.6</bop.api.version>
-		<bouncycastle.version>1.48</bouncycastle.version>
-		<protobuf.version>2.4.1</protobuf.version>
+	    <project.mainclass>com.bitsofproof.merchant.client.KeyTool</project.mainclass>
+		<bop.api.version>3.4.4</bop.api.version>
+		<bouncycastle.version>1.50</bouncycastle.version>
+		<protobuf.version>2.5.0</protobuf.version>
 		<slf4j.version>1.6.6</slf4j.version>
 		<java.compiler.version>1.7</java.compiler.version>
 		<commons-cli.version>1.2</commons-cli.version>
@@ -50,7 +43,12 @@
 	<dependencies>
 		<dependency>
 			<groupId>com.bitsofproof</groupId>
-			<artifactId>bitsofproof-server-api</artifactId>
+			<artifactId>bop-bitcoin-client-api</artifactId>
+			<version>${bop.api.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.bitsofproof</groupId>
+			<artifactId>bop-bitcoin-client-misc</artifactId>
 			<version>${bop.api.version}</version>
 		</dependency>
 		<dependency>
@@ -129,13 +127,71 @@
 					<archive>
 						<manifest>
 							<addClasspath>true</addClasspath>
-							<mainClass>com.bitsofproof.merchant.client.KeyTool</mainClass>
+							<mainClass>${project.mainclass}</mainClass>
 							<classpathPrefix>lib/</classpathPrefix>
 						</manifest>
 					</archive>
 				</configuration>
 			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-assembly-plugin</artifactId>
+				<version>2.4</version>
+				<configuration>
+					<descriptors>
+						<descriptor>assembly/binary.xml</descriptor>
+						<descriptor>assembly/source.xml</descriptor>
+					</descriptors>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-shade-plugin</artifactId>
+				<version>2.1</version>
+				<executions>
+					<execution>
+						<phase>package</phase>
+						<goals>
+							<goal>shade</goal>
+						</goals>
+						<configuration>
+							<shadedArtifactAttached>true</shadedArtifactAttached>
+							<shadedClassifierName>shaded</shadedClassifierName>
+							<transformers>
+								<transformer
+									implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
+								<transformer
+									implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+									<manifestEntries>
+										<Class-Path>lib-signed/bcprov-jdk15on.jar</Class-Path>
+										<Main-Class>${project.mainclass}</Main-Class>
+									</manifestEntries>
+								</transformer>
+							</transformers>
 
+							<!-- signatures from foreign jars are bad news -->
+							<filters>
+								<filter>
+									<artifact>*:*</artifact>
+									<excludes>
+										<exclude>META-INF/*.SF</exclude>
+										<exclude>META-INF/*.DSA</exclude>
+										<exclude>META-INF/*.RSA</exclude>
+										<exclude>context/*.xml</exclude>
+										<exclude>log4j.properties</exclude>
+									</excludes>
+								</filter>
+							</filters>
+
+							<artifactSet>
+								<excludes>
+									<exclude>org.bouncycastle:bcprov-jdk15on</exclude>
+								</excludes>
+							</artifactSet>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
 		</plugins>
 		<pluginManagement>
 			<plugins>
@@ -177,14 +233,24 @@
 	</build>
 
 	<distributionManagement>
-		<downloadUrl>http://maven.bitsofproof.com/maven</downloadUrl>
 		<repository>
 			<id>bitsofproof</id>
-			<uniqueVersion>false</uniqueVersion>
-			<name>BOP Enterprise Bitcoin Server Repository</name>
-			<url>scp://maven@maven.bitsofproof.com/home/maven/repository</url>
-			<layout>default</layout>
+			<name>bop internal repository</name>
+			<url>https://bitsofproof.com/nexus/content/repositories/releases</url>
 		</repository>
+		<snapshotRepository>
+			<id>bitsofproof</id>
+			<name>bop internal repository</name>
+			<url>https://bitsofproof.com/nexus/content/repositories/snapshots</url>
+		</snapshotRepository>
 	</distributionManagement>
+
+	<repositories>
+		<repository>
+			<id>bitsofproof-public</id>
+			<name>bop internal repository</name>
+			<url>https://bitsofproof.com/nexus/content/groups/public</url>
+		</repository>
+	</repositories>
 
 </project>
