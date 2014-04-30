@@ -10,9 +10,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.Security;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -51,6 +49,11 @@ public class KeyTool
 
 	private static final String SERVER_URL = "https://api.bitsofproof.com/mbs/1";
 
+	private static final long DUST_LIMIT = 5430;
+	private static final long KB_FEE = 1000;
+	private static final long MINIMUM_FEE = 10000;
+	private static final long MAXIMUM_FEE = 1000000;
+
 	public static void main (String[] args)
 	{
 		final CommandLineParser parser = new GnuParser ();
@@ -65,7 +68,7 @@ public class KeyTool
 		gnuOptions.addOption ("E", "export", false, "Export master private key");
 		gnuOptions.addOption ("l", "late", true, "extract key for a late payment");
 
-		System.out.println ("BOP Merchant Server Client 2.2 (c) 2013 bits of proof zrt.");
+		System.out.println ("BOP Merchant Server Client 2.3 (c) 2013 bits of proof zrt.");
 		Security.addProvider (new BouncyCastleProvider ());
 		CommandLine cl = null;
 		String user = null;
@@ -288,21 +291,11 @@ public class KeyTool
 
 				long paid = 0;
 
-				Map<String, Long> provision = new HashMap<String, Long> ();
 				for ( JSONObject pr : prs )
 				{
-					Long p = pr.getLong ("provisionAmount");
-					if ( pr.has ("provisionPaid") )
-					{
-						p -= pr.getLong ("provisionPaid");
-					}
-					if ( p > 0 )
-					{
-						provision.put (pr.getString ("provisionAddress"), p);
-					}
 					paid += pr.getLong ("paid");
 				}
-				long fee = Math.min (10000 * (prs.size () / 4 + 1), 1000000);
+				long fee = Math.max (Math.min (MAXIMUM_FEE, (prs.size () / 4 + 1) * KB_FEE), MINIMUM_FEE);
 				if ( paid == 0 || (paid - fee) <= 0 )
 				{
 					System.err.println ("Nothing left to claim.");
@@ -315,18 +308,8 @@ public class KeyTool
 				List<TransactionOutput> outputs = new ArrayList<TransactionOutput> ();
 				t.setOutputs (outputs);
 
-				long pp = 0;
-				for ( Map.Entry<String, Long> p : provision.entrySet () )
-				{
-					TransactionOutput o = new TransactionOutput ();
-					o.setValue (p.getValue ());
-					writeOutputScript (p.getKey (), o);
-					outputs.add (o);
-					pp += p.getValue ();
-				}
-
 				TransactionOutput o = new TransactionOutput ();
-				o.setValue (paid - fee - pp);
+				o.setValue (paid - fee);
 				outputs.add (o);
 				writeOutputScript (address, o);
 
