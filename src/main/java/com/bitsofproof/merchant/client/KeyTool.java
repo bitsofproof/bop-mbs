@@ -68,7 +68,7 @@ public class KeyTool
 		gnuOptions.addOption ("E", "export", false, "Export master private key");
 		gnuOptions.addOption ("l", "late", true, "extract key for a late payment");
 
-		System.out.println ("BOP Merchant Server Client 2.3 (c) 2013 bits of proof zrt.");
+		System.out.println ("BOP Merchant Server Client 2.4 (c) 2013 bits of proof zrt.");
 		Security.addProvider (new BouncyCastleProvider ());
 		CommandLine cl = null;
 		String user = null;
