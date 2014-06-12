@@ -232,7 +232,7 @@ public class KeyTool
 			try
 			{
 				HttpClient httpclient = new DefaultHttpClient ();
-				HttpGet get = new HttpGet (SERVER_URL + "/paymentRequest?state=CLEARED");
+				HttpGet get = new HttpGet (SERVER_URL + "/paymentRequest?state=CLEARED&entriesPerPage=1000");
 				String authorizationString = "Basic " + new String (Base64.encodeBase64 ((user + ":" + password).getBytes (), false));
 				get.setHeader ("Authorization", authorizationString);
 				HttpResponse response = httpclient.execute (get);
